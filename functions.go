@@ -36,15 +36,24 @@ func display(name string, sum int){
 	fmt.Println("Sume of two number is: ",sum)
 }
 
+
+
 func main(){
 	welcomemessage()
 	name := getUserName()
 	num1 , num2 := getTwoNumbers()
 	sum:=add(num1,num2)
 	display(name, sum)
+
+	func(a int, b int){
+		c :=a+b
+		fmt.Println("Sum of two..:", c)
+	}(3,4)
 }
 
 
 func init(){
 	fmt.Println("This is init function")
 }
+
+
