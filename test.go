@@ -1,5 +1,7 @@
 package main
 import "fmt"
-func main(){
-	fmt.Println("main function")
-}
+func main() {
+	var x int = 1
+	fmt.Println(x << -1)
+   }
+   
