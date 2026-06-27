@@ -151,10 +151,17 @@ func main() {
 	r.Use(loggingMiddleware)
 
 	r.Get("/health", healthHandler)
-	r.Post("/jobs", handlers.CreateJobHandler(pool))
-	r.Get("/jobs/{id}", handlers.GetJobHandler(pool))
-	r.Get("/jobs", handlers.ListJobsHandler(pool))
+	// r.Post("/jobs", handlers.CreateJobHandler(pool))
+	// r.Get("/jobs/{id}", handlers.GetJobHandler(pool))
+	// r.Get("/jobs", handlers.ListJobsHandler(pool))
 	r.Post("/auth/register", handlers.RegisterHandler(pool))
+	r.Post("/auth/login", handlers.LoginHandler(pool))
+	r.Group(func(protected chi.Router) {
+		protected.Use(handlers.JWTMiddleware)
+		protected.Post("/jobs", handlers.CreateJobHandler(pool))
+		protected.Get("/jobs/{id}", handlers.GetJobHandler(pool))
+		protected.Get("/jobs", handlers.ListJobsHandler(pool))		
+	})
 
 	err = http.ListenAndServe(":8080", r)
 	if err != nil {
