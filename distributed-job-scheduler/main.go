@@ -3,14 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
-    "errors"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 type Job struct {
 	ID        int64           `json:"id"`
@@ -56,24 +59,61 @@ func createJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		})
 	}
 }
+// func getJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		idStr := chi.URLParam(r, "id")
+// 		id, err := strconv.ParseInt(idStr, 10, 64)
+// 		if err != nil {
+// 			http.Error(w, "invalid job id", http.StatusBadRequest)
+// 			return
+// 		}
+
+// 		var jobType, status string
+// 		var payload json.RawMessage
+// 		var createdAt time.Time
+
+// 		err = pool.QueryRow(
+// 			r.Context(),
+// 			"SELECT job_type, payload, status, created_at FROM jobs WHERE id = $1",
+// 			id,
+// 		).Scan(&jobType, &payload, &status, &createdAt)
+
+// 		if errors.Is(err, pgx.ErrNoRows) {
+// 			http.Error(w, "job not found", http.StatusNotFound)
+// 			return
+// 		}
+// 		if err != nil {
+// 			http.Error(w, "failed to fetch job", http.StatusInternalServerError)
+// 			return
+// 		}
+
+// 		w.Header().Set("Content-Type", "application/json")
+// 		w.WriteHeader(http.StatusOK)
+// 		json.NewEncoder(w).Encode(map[string]any{
+// 			"id":         id,
+// 			"job_type":   jobType,
+// 			"payload":    payload,
+// 			"status":     status,
+// 			"created_at": createdAt,
+// 		})
+// 	}
+// }
+
 func getJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.PathValue("id")
+		idStr := chi.URLParam(r, "id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			http.Error(w, "invalid job id", http.StatusBadRequest)
 			return
 		}
 
-		var jobType, status string
-		var payload json.RawMessage
-		var createdAt time.Time
-
+		var j Job
 		err = pool.QueryRow(
 			r.Context(),
-			"SELECT job_type, payload, status, created_at FROM jobs WHERE id = $1",
+			"SELECT id, job_type, payload, status, created_at FROM jobs WHERE id = $1",
 			id,
-		).Scan(&jobType, &payload, &status, &createdAt)
+		).Scan(&j.ID, &j.JobType, &j.Payload, &j.Status, &j.CreatedAt)
 
 		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "job not found", http.StatusNotFound)
@@ -86,13 +126,7 @@ func getJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":         id,
-			"job_type":   jobType,
-			"payload":    payload,
-			"status":     status,
-			"created_at": createdAt,
-		})
+		json.NewEncoder(w).Encode(j)
 	}
 }
 
@@ -127,10 +161,24 @@ func listJobsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		json.NewEncoder(w).Encode(jobs)
 	}
 } 
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s %s", r.Method, r.RequestURI, r.RemoteAddr)
+		next.ServeHTTP(w, r)
+	})
+}
 func main() {
 	ctx := context.Background()
+	if err:= godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
 
-	connString := "postgres://postgres:postgres@localhost:5432/job-scheduler"
+	// connString := "postgres://postgres:postgres@localhost:5432/job-scheduler"
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		log.Fatal("DATABASE_URL environment variable is not set")	
+	}
 
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
@@ -143,15 +191,21 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("connected to db")
+	r := chi.NewRouter()
+	r.Use(loggingMiddleware)
+	r.Get("/health", healthHandler)
+	r.Post("/jobs", createJobHandler(pool))
+	r.Get("/jobs/{id}", getJobHandler(pool))
+	r.Get("/jobs", listJobsHandler(pool))
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
-	log.Println("test log...")
-	mux.HandleFunc("POST /jobs", createJobHandler(pool))
-	mux.HandleFunc("GET /jobs/{id}", getJobHandler(pool))
-	mux.HandleFunc("GET /jobs", listJobsHandler(pool))
+	// mux := http.NewServeMux()
+	// mux.HandleFunc("/health", healthHandler)
+	// log.Println("test log...")
+	// mux.HandleFunc("POST /jobs", createJobHandler(pool))
+	// mux.HandleFunc("GET /jobs/{id}", getJobHandler(pool))
+	// mux.HandleFunc("GET /jobs", listJobsHandler(pool))
 
-	err = http.ListenAndServe(":8080", mux)
+	err = http.ListenAndServe(":8080", r)
 	if err != nil {
 		log.Fatal(err)
 	}
