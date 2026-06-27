@@ -2,30 +2,28 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
-	"github.com/zahid031/distributed-job-scheduler/handlers"
 
+	"github.com/zahid031/distributed-job-scheduler/handlers"
 )
-type Job struct {
-	ID        int64           `json:"id"`
-	JobType   string          `json:"job_type"`
-	Payload   json.RawMessage `json:"payload"`
-	Status    string          `json:"status"`
-	CreatedAt time.Time       `json:"created_at"`
-}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
 
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s %s", r.Method, r.RequestURI, r.RemoteAddr)
+		next.ServeHTTP(w, r)
+	})
+}
 // func createJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
 // 		var input struct {
@@ -123,22 +121,18 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 // 	}
 // } 
 
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s %s", r.Method, r.RequestURI, r.RemoteAddr)
-		next.ServeHTTP(w, r)
-	})
-}
+
+
 func main() {
-	ctx := context.Background()
-	if err:= godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found, relying on real environment variables")
 	}
 
-	// connString := "postgres://postgres:postgres@localhost:5432/job-scheduler"
+	ctx := context.Background()
+
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
-		log.Fatal("DATABASE_URL environment variable is not set")	
+		log.Fatal("DATABASE_URL environment variable is not set")
 	}
 
 	pool, err := pgxpool.New(ctx, connString)
@@ -152,19 +146,15 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("connected to db")
+
 	r := chi.NewRouter()
 	r.Use(loggingMiddleware)
+
 	r.Get("/health", healthHandler)
 	r.Post("/jobs", handlers.CreateJobHandler(pool))
 	r.Get("/jobs/{id}", handlers.GetJobHandler(pool))
 	r.Get("/jobs", handlers.ListJobsHandler(pool))
-
-	// mux := http.NewServeMux()
-	// mux.HandleFunc("/health", healthHandler)
-	// log.Println("test log...")
-	// mux.HandleFunc("POST /jobs", createJobHandler(pool))
-	// mux.HandleFunc("GET /jobs/{id}", getJobHandler(pool))
-	// mux.HandleFunc("GET /jobs", listJobsHandler(pool))
+	r.Post("/auth/register", handlers.RegisterHandler(pool))
 
 	err = http.ListenAndServe(":8080", r)
 	if err != nil {
