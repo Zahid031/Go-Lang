@@ -12,7 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5"
 )
-
+type Job struct {
+	ID        int64           `json:"id"`
+	JobType   string          `json:"job_type"`
+	Payload   json.RawMessage `json:"payload"`
+	Status    string          `json:"status"`
+	CreatedAt time.Time       `json:"created_at"`
+}
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
@@ -89,6 +95,38 @@ func getJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		})
 	}
 }
+
+func listJobsHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := pool.Query(
+			r.Context(),
+			"SELECT id, job_type, payload, status, created_at FROM jobs",
+		)
+		if err != nil {
+			http.Error(w, "failed to fetch jobs", http.StatusInternalServerError)
+			return 
+		}
+		defer rows.Close()
+		var jobs []Job 
+		for rows.Next() {
+			var j Job
+			err := rows.Scan(&j.ID, &j.JobType, &j.Payload, &j.Status, &j.CreatedAt)
+			if err != nil {
+				http.Error(w, "failed to scan job", http.StatusInternalServerError)
+				return
+			}
+			jobs = append(jobs, j)
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, "error iterating over jobs", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(jobs)
+	}
+} 
 func main() {
 	ctx := context.Background()
 
@@ -108,8 +146,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	log.Println("test log...")
 	mux.HandleFunc("POST /jobs", createJobHandler(pool))
 	mux.HandleFunc("GET /jobs/{id}", getJobHandler(pool))
+	mux.HandleFunc("GET /jobs", listJobsHandler(pool))
 
 	err = http.ListenAndServe(":8080", mux)
 	if err != nil {
