@@ -11,6 +11,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/zahid031/distributed-job-scheduler/handlers"
+	"github.com/zahid031/distributed-job-scheduler/redisclient"
+
 )
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +148,10 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("connected to db")
+
+	redisClient := redisclient.NewClient(ctx)
+	log.Println("connected to redis")
+	defer redisClient.Close()
 
 	r := chi.NewRouter()
 	r.Use(loggingMiddleware)
