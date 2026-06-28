@@ -164,7 +164,7 @@ func main() {
 	r.Post("/auth/login", handlers.LoginHandler(pool))
 	r.Group(func(protected chi.Router) {
 		protected.Use(handlers.JWTMiddleware)
-		protected.Post("/jobs", handlers.CreateJobHandler(pool))
+		protected.Post("/jobs", handlers.CreateJobHandler(pool, redisClient))
 		protected.Get("/jobs/{id}", handlers.GetJobHandler(pool))
 		protected.Get("/jobs", handlers.ListJobsHandler(pool))		
 	})

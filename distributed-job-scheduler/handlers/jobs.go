@@ -9,45 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/zahid031/distributed-job-scheduler/models"
 )
 
-// func CreateJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		var input struct {
-// 			JobType string          `json:"job_type"`
-// 			Payload json.RawMessage `json:"payload"`
-// 		}
+const jobQueueKey = "jobs:queue"
 
-// 		err := json.NewDecoder(r.Body).Decode(&input)
-// 		if err != nil {
-// 			http.Error(w, "invalid request body", http.StatusBadRequest)
-// 			return
-// 		}
-
-// 		var id int64
-// 		err = pool.QueryRow(
-// 			r.Context(),
-// 			"INSERT INTO jobs (job_type, payload) VALUES ($1, $2) RETURNING id",
-// 			input.JobType, input.Payload,
-// 		).Scan(&id)
-// 		if err != nil {
-// 			http.Error(w, "failed to create job", http.StatusInternalServerError)
-// 			return
-// 		}
-
-// 		w.Header().Set("Content-Type", "application/json")
-// 		w.WriteHeader(http.StatusCreated)
-// 		json.NewEncoder(w).Encode(map[string]any{
-// 			"id":     id,
-// 			"status": "pending",
-// 		})
-// 	}
-// }
-
-
-func CreateJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
+func CreateJobHandler(pool *pgxpool.Pool, redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value(userIDKey).(int64)
 		if !ok {
@@ -74,6 +43,12 @@ func CreateJobHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		).Scan(&id)
 		if err != nil {
 			http.Error(w, "failed to create job", http.StatusInternalServerError)
+			return
+		}
+
+		err = redisClient.RPush(r.Context(), jobQueueKey, id).Err()
+		if err != nil {
+			http.Error(w, "failed to enqueue job", http.StatusInternalServerError)
 			return
 		}
 
