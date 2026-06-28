@@ -30,6 +30,9 @@ func JWTMiddleware(next http.Handler) http.Handler {
 		tokenString := strings.TrimPrefix(authHeader, prefix)
 
 		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 		if err != nil || !token.Valid {
