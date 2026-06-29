@@ -14,6 +14,8 @@ import (
 
 const JobQueueKey = "jobs:queue"
 
+const NumWorkers = 3
+
 type Worker struct {
 	pool  *pgxpool.Pool
 	redis *redis.Client
@@ -24,27 +26,38 @@ func New(pool *pgxpool.Pool, redisClient *redis.Client) *Worker {
 }
 
 func (w *Worker) Run(ctx context.Context) {
-	log.Println("worker started, waiting for jobs...")
+	log.Printf("starting %d workers, waiting for jobs...", NumWorkers)
 
+	for i := 1; i <= NumWorkers; i++ {
+		go w.loop(ctx, i)
+	}
+
+	// Block forever so Run doesn't return immediately while goroutines
+	// keep working in the background. We'll replace this with a proper
+	// shutdown signal later.
+	select {}
+}
+
+func (w *Worker) loop(ctx context.Context, workerID int) {
 	for {
 		result, err := w.redis.BLPop(ctx, 5*time.Second, JobQueueKey).Result()
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
 				continue
 			}
-			log.Printf("error popping from queue: %v", err)
+			log.Printf("[worker %d] error popping from queue: %v", workerID, err)
 			continue
 		}
 
 		jobID := result[1]
-		w.processJob(ctx, jobID)
+		w.processJob(ctx, workerID, jobID)
 	}
 }
 
-func (w *Worker) processJob(ctx context.Context, jobIDStr string) {
+func (w *Worker) processJob(ctx context.Context, workerID int, jobIDStr string) {
 	id, err := strconv.ParseInt(jobIDStr, 10, 64)
 	if err != nil {
-		log.Printf("invalid job id from queue: %s", jobIDStr)
+		log.Printf("[worker %d] invalid job id from queue: %s", workerID, jobIDStr)
 		return
 	}
 
@@ -54,22 +67,22 @@ func (w *Worker) processJob(ctx context.Context, jobIDStr string) {
 		id,
 	).Scan(&jobType)
 	if errors.Is(err, pgx.ErrNoRows) {
-		log.Printf("job %d not found in db, skipping", id)
+		log.Printf("[worker %d] job %d not found in db, skipping", workerID, id)
 		return
 	}
 	if err != nil {
-		log.Printf("failed to fetch job %d: %v", id, err)
+		log.Printf("[worker %d] failed to fetch job %d: %v", workerID, id, err)
 		return
 	}
 
-	log.Printf("starting job %d (type=%s)", id, jobType)
+	log.Printf("[worker %d] starting job %d (type=%s)", workerID, id, jobType)
 
 	_, err = w.pool.Exec(ctx,
 		"UPDATE jobs SET status = 'running' WHERE id = $1",
 		id,
 	)
 	if err != nil {
-		log.Printf("failed to mark job %d as running: %v", id, err)
+		log.Printf("[worker %d] failed to mark job %d as running: %v", workerID, id, err)
 		return
 	}
 
@@ -81,9 +94,9 @@ func (w *Worker) processJob(ctx context.Context, jobIDStr string) {
 		id,
 	)
 	if err != nil {
-		log.Printf("failed to mark job %d as completed: %v", id, err)
+		log.Printf("[worker %d] failed to mark job %d as completed: %v", workerID, id, err)
 		return
 	}
 
-	log.Printf("finished job %d", id)
+	log.Printf("[worker %d] finished job %d", workerID, id)
 }
